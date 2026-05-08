@@ -81,7 +81,7 @@ class NaiveBayes(object):
         for item, label in zip(X,y):
             if label == '|B-DISEASE\n':
                 B.append(item)
-            elif label == 'I-DISEASE\n':
+            elif label == '|I-DISEASE\n':
                 I.append(item)
             else:
                 O.append(item)
@@ -93,7 +93,7 @@ class NaiveBayes(object):
         for word, count in B_dict.items():
             self.features['B'][word] = math.log((int(count) + 1) /(count_B + doc_count))
         for word, count in I_dict.items():
-            self.ffeatures['I'][word] = math.log((int(count) + 1) /(count_I + doc_count))
+            self.features['I'][word] = math.log((int(count) + 1) /(count_I + doc_count))
         for word, count in O_dict.items():
             self.features['O'][word] = math.log((int(count) + 1) /(count_O + doc_count))
         print("Training Completed...")
@@ -199,7 +199,7 @@ class NaiveBayes(object):
         for item, label in zip(X,y):
             if label == '|B-PROTEIN\n':
                 B.append(item)
-            elif label == 'I-PROTEIN\n':
+            elif label == '|I-PROTEIN\n':
                 I.append(item)
             else:
                 O.append(item)
@@ -211,7 +211,7 @@ class NaiveBayes(object):
         for word, count in B_dict.items():
             self.features['B'][word] = math.log((int(count) + 1) /(count_B + doc_count))
         for word, count in I_dict.items():
-            self.ffeatures['I'][word] = math.log((int(count) + 1) /(count_I + doc_count))
+            self.features['I'][word] = math.log((int(count) + 1) /(count_I + doc_count))
         for word, count in O_dict.items():
             self.features['O'][word] = math.log((int(count) + 1) /(count_O + doc_count))
         print("Training Completed...")

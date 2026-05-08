@@ -1,106 +1,207 @@
-import pandas as pd
-from collections import Counter
-import time
-import wandb
+"""
+BiLSTM and BiLSTM-CRF training for disease NER.
+
+Two changes vs. the original Train.py:
+
+1. There is now a real BiLSTM-CRF variant. The CRF layer is implemented
+   in `crf_layer.py` (no `keras-contrib` / `tensorflow-addons`
+   dependency, both of which are unmaintained as of 2025).
+
+2. Evaluation runs on the held-out NCBI test set (test.iob), not on a
+   train-internal validation split, and uses entity-level seqeval
+   metrics. The previous setup never touched test.iob.
+
+Seed control is exposed via `seed=` so the multi-seed runner can
+aggregate mean ± std.
+"""
+
+from __future__ import annotations
+
+import os
 import pickle
-from wandb.keras import WandbCallback
-wandb.init(project="GALE_LIME_NER_LSTM_CRF_DISEASE", entity="robofied")
+import random
+import time
+from collections import Counter
+from typing import Any
 
-from tensorflow import keras
-from tensorflow.keras import layers
-from tensorflow.keras.utils import pad_sequences
-from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
+import numpy as np
 
-'''
-To create Neural Network architectures
-'''
-class NeuralNetwork(object):
-    #Setting properties to be used in Neural Network
-    def __init__(self, data):
-        self.n_sent = 1
-        self.data = data
-        self.words = list(set(data["Word"].values))
-        self.n_words = len(self.words)
-        self.tags = list(set(self.data["Tag"].values))
-        self.n_tags = len(self.tags)
-        self.empty = False
-        agg_func = lambda s: [(w, p, t) for w, p, t in zip(s["Word"].values.tolist(), s["POS"].values.tolist(), s["Tag"].values.tolist())]
-        self.grouped = self.data.groupby("Sentence").apply(agg_func)
-        self.sentences = [s for s in self.grouped]
-    
+from data_loader import NERDataset
+from Evaluation import evaluate
 
-    def get_next(self):
-        try:
-            s = self.grouped["Sentence: {}".format(self.n_sent)]
-            self.n_sent += 1
-            return s
-        except:
-            return None
+try:
+    import tensorflow as tf
+    from tensorflow import keras
+    from tensorflow.keras import layers
+    from tensorflow.keras.utils import pad_sequences
+    _TF_OK = True
+except Exception as _e:  # pragma: no cover
+    _TF_OK = False
+    _TF_IMPORT_ERR = _e
 
-    #To endcode data for training
-    def Data_Encoding(self):
-        labels = [[s[2] for s in sent] for sent in self.sentences]
-        sentences = [" ".join([s[0] for s in sent]) for sent in self.sentences]
-        word_cnt = Counter(self.data["Word"].values)
-        vocabulary = set(w[0] for w in word_cnt.most_common(5000))
-        self.max_len = 114
-        word2idx = {"PAD": 0, "UNK": 1}
-        word2idx.update({w: i for i, w in enumerate(self.words) if w in vocabulary})
-        tag2idx = {t: i for i, t in enumerate(self.tags)}
 
-        #Saving word2idx, tag2idx for later use
-        with open('../data/word2idx.pkl', 'wb') as f:
-            pickle.dump(word2idx, f)
-        
-        with open('../data/tag2idx.pkl', 'wb') as f:
-            pickle.dump(tag2idx, f)
+def _require_tf() -> None:
+    if not _TF_OK:
+        raise ImportError(
+            f"TensorFlow is not available in this environment ({_TF_IMPORT_ERR}). "
+            "Install tensorflow>=2.10 to train the BiLSTM/BiLSTM-CRF models."
+        )
 
-        X = [[word2idx.get(w, word2idx["UNK"]) for w in s.split()] for s in sentences]
-        X = pad_sequences(maxlen=self.max_len, sequences=X, padding="post", value=word2idx["PAD"])
-        y = [[tag2idx[l_i] for l_i in l] for l in labels]
-        y = pad_sequences(maxlen=self.max_len, sequences=y, padding="post", value=tag2idx["|O\n"])
-        self.X_tr, self.X_te, self.y_tr, self.y_te = train_test_split(X, y, test_size=0.2, shuffle=False)
-        print("Completed till split")
-    
-    #LSTM Model for training
-    def LSTM_NN(self):
-        wandb.config = {"learning_rate": 0.001,
-                        "epochs": 100,
-                        "batch_size": 128}
-                        
-        word_input = keras.Input(shape=(self.max_len,))
-        model = layers.Embedding(input_dim=self.n_words, output_dim=50, input_length=self.max_len)(word_input)
-        model = layers.SpatialDropout1D(0.1)(model)
-        model = layers.Bidirectional(layers.LSTM(units=100, return_sequences=True, recurrent_dropout=0.1))(model)
-        out = layers.TimeDistributed(layers.Dense(self.n_tags, activation="softmax"))(model)
-        model = keras.Model(word_input, out)
-        opt = keras.optimizers.Adam(learning_rate = 0.001)
-        model.compile(optimizer=opt, loss="sparse_categorical_crossentropy", metrics=["accuracy"])
-        self.history = model.fit(self.X_tr, self.y_tr.reshape(*self.y_tr.shape, 1), batch_size=32, epochs=20, validation_split=0.2, verbose=1, callbacks=[WandbCallback()])
-        name = '../models/' + 'ckpt' +str(time.time()) + '.h5'
+
+def set_global_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    if _TF_OK:
+        tf.random.set_seed(seed)
+
+
+class Encoder:
+    """Builds and applies (word2idx, tag2idx) over an `NERDataset`."""
+
+    def __init__(self, max_len: int = 114, vocab_size: int = 5000):
+        self.max_len = max_len
+        self.vocab_size = vocab_size
+        self.word2idx: dict[str, int] = {}
+        self.tag2idx: dict[str, int] = {}
+
+    def fit(self, train: NERDataset) -> "Encoder":
+        word_cnt: Counter[str] = Counter()
+        for s in train.sentences:
+            word_cnt.update(s)
+        most_common = [w for w, _ in word_cnt.most_common(self.vocab_size)]
+        self.word2idx = {"PAD": 0, "UNK": 1}
+        for i, w in enumerate(most_common, start=2):
+            self.word2idx[w] = i
+        labels = train.label_set()
+        self.tag2idx = {t: i for i, t in enumerate(labels)}
+        return self
+
+    @property
+    def idx2tag(self) -> dict[int, str]:
+        return {i: t for t, i in self.tag2idx.items()}
+
+    def transform(self, ds: NERDataset) -> tuple[np.ndarray, np.ndarray]:
+        _require_tf()
+        unk = self.word2idx["UNK"]
+        pad_w = self.word2idx["PAD"]
+        pad_y = self.tag2idx.get("O", 0)
+        X = [[self.word2idx.get(w, unk) for w in s] for s in ds.sentences]
+        y = [[self.tag2idx.get(t, pad_y) for t in ts] for ts in ds.tags]
+        X = pad_sequences(maxlen=self.max_len, sequences=X, padding="post", value=pad_w)
+        y = pad_sequences(maxlen=self.max_len, sequences=y, padding="post", value=pad_y)
+        return X, y
+
+    def decode_predictions(
+        self,
+        ds: NERDataset,
+        pred_ids: np.ndarray,
+    ) -> list[list[str]]:
+        """Trim padded predictions back to original sentence lengths."""
+        idx2tag = self.idx2tag
+        out: list[list[str]] = []
+        for sent, row in zip(ds.sentences, pred_ids):
+            n = min(len(sent), self.max_len)
+            out.append([idx2tag.get(int(row[i]), "O") for i in range(n)])
+        return out
+
+    def save(self, root: str = "../data") -> None:
+        os.makedirs(root, exist_ok=True)
+        with open(os.path.join(root, "word2idx.pkl"), "wb") as f:
+            pickle.dump(self.word2idx, f)
+        with open(os.path.join(root, "tag2idx.pkl"), "wb") as f:
+            pickle.dump(self.tag2idx, f)
+
+
+def build_bilstm(n_words: int, n_tags: int, max_len: int) -> "keras.Model":
+    _require_tf()
+    inp = keras.Input(shape=(max_len,))
+    x = layers.Embedding(input_dim=n_words, output_dim=50, input_length=max_len, mask_zero=True)(inp)
+    x = layers.SpatialDropout1D(0.1)(x)
+    x = layers.Bidirectional(layers.LSTM(units=100, return_sequences=True, recurrent_dropout=0.1))(x)
+    out = layers.TimeDistributed(layers.Dense(n_tags, activation="softmax"))(x)
+    model = keras.Model(inp, out)
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=1e-3),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    return model
+
+
+def build_bilstm_crf(n_words: int, n_tags: int, max_len: int) -> "keras.Model":
+    _require_tf()
+    from crf_layer import CRF  # local, lazy
+
+    inp = keras.Input(shape=(max_len,))
+    x = layers.Embedding(input_dim=n_words, output_dim=50, input_length=max_len, mask_zero=True)(inp)
+    x = layers.SpatialDropout1D(0.1)(x)
+    x = layers.Bidirectional(layers.LSTM(units=100, return_sequences=True, recurrent_dropout=0.1))(x)
+    x = layers.TimeDistributed(layers.Dense(n_tags))(x)
+    crf = CRF(n_tags, name="crf")
+    out = crf(x)
+    model = keras.Model(inp, out)
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3), loss=crf.loss, metrics=[crf.accuracy])
+    return model
+
+
+def train_and_eval(
+    train_ds: NERDataset,
+    test_ds: NERDataset,
+    *,
+    model_kind: str = "bilstm",
+    epochs: int = 20,
+    batch_size: int = 32,
+    seed: int = 42,
+    save_dir: str = "../models",
+    return_predictions: bool = False,
+) -> dict[str, Any]:
+    """Fit `model_kind` on `train_ds` and report seqeval metrics on `test_ds`."""
+    _require_tf()
+    set_global_seed(seed)
+
+    enc = Encoder().fit(train_ds)
+    enc.save()
+    X_tr, y_tr = enc.transform(train_ds)
+    X_te, y_te = enc.transform(test_ds)
+    n_words = max(enc.word2idx.values()) + 1
+    n_tags = len(enc.tag2idx)
+
+    if model_kind == "bilstm":
+        model = build_bilstm(n_words, n_tags, enc.max_len)
+        y_tr_fit = y_tr.reshape(*y_tr.shape, 1)
+    elif model_kind == "bilstm_crf":
+        model = build_bilstm_crf(n_words, n_tags, enc.max_len)
+        y_tr_fit = y_tr  # CRF loss takes 2D ints
+    else:
+        raise ValueError(f"unknown model_kind: {model_kind}")
+
+    history = model.fit(
+        X_tr, y_tr_fit,
+        batch_size=batch_size, epochs=epochs,
+        validation_split=0.1, verbose=2,
+    )
+
+    os.makedirs(save_dir, exist_ok=True)
+    name = os.path.join(save_dir, f"{model_kind}_seed{seed}_{int(time.time())}.h5")
+    try:
         model.save(name)
-        print("Model saved in model directory...")
-        return self.history
+    except Exception:
+        # CRF custom layer may not pickle cleanly with .h5 in all TF versions.
+        model.save_weights(name.replace(".h5", ".weights.h5"))
 
-    #Training Plots for Accuracy and Loss
-    def Training_Plots(self):
-        history = self.history
-        plt.plot(history.history['accuracy'])
-        plt.plot(history.history['val_accuracy'])
-        plt.title('model accuracy')
-        plt.ylabel('accuracy')
-        plt.xlabel('epoch')
-        plt.legend(['train', 'val'], loc='upper left')
-        acc_fig_name = '../figures/' + 'ckpt_acc' +str(time.time()) + '.png'
-        plt.savefig(acc_fig_name)
-        plt.clf()
+    raw = model.predict(X_te, batch_size=batch_size, verbose=0)
+    if model_kind == "bilstm":
+        pred_ids = raw.argmax(-1)
+    else:
+        pred_ids = raw  # CRF returns Viterbi-decoded ints
+    y_pred_seqs = enc.decode_predictions(test_ds, pred_ids)
+    y_true_seqs = test_ds.tags
 
-        plt.plot(history.history['loss'])
-        plt.plot(history.history['val_loss'])
-        plt.title('model loss')
-        plt.ylabel('loss')
-        plt.xlabel('epoch')
-        plt.legend(['train', 'val'], loc='upper left')
-        loss_fig_name = '../figures/' + 'ckpt_loss' +str(time.time()) + '.png'
-        plt.savefig(loss_fig_name)
+    metrics = evaluate(y_true_seqs, y_pred_seqs, print_report=True)
+    metrics["model_kind"] = model_kind
+    metrics["seed"] = seed
+    metrics["weights_path"] = name
+    if return_predictions:
+        metrics["y_pred"] = y_pred_seqs
+        metrics["y_true"] = y_true_seqs
+    return metrics
