@@ -164,6 +164,66 @@ python interpretability_compare.py \
 ```
 
 
+### Saliency-disagreement study (paper framing 1)
+---------------------------------------------------
+
+The repo also scaffolds the experiment described in the project
+roadmap: *do saliency methods disagree more on biomedical NER than on
+general-domain NER, and if so, what phenomena drive the gap?* This
+extends Jukic, Tutek & Snajder (ACL 2023 Findings) and Krishna et al.
+(2022) to a domain that previous saliency-disagreement work hasn't
+covered.
+
+Modules under `code/explainers/`:
+
+  - `saliency_metrics.py` - feature agreement @k, rank agreement @k,
+    sign agreement, signed rank agreement @k, Spearman rank
+    correlation; `pairwise_table()` returns long-form rows ready for
+    aggregation.
+  - `phenomena.py` - per-sentence features (OOV-rate vs. CoNLL-2003
+    train, multi-word entity presence, abbreviation density,
+    `( ABBR )` definitions) and a `bucketize()` helper.
+  - `faithfulness.py` - deletion / insertion AUC against any
+    `score_fn(words) -> P(target)`. Used as a sanity check that any
+    cross-domain disagreement gap isn't just one method failing.
+  - `integrated_gradients.py` - IG via Captum on the
+    PubMedBERT/BioBERT/BERT models (the third saliency method
+    alongside LIME and attention).
+
+Driver: `code/run_disagreement_study.py`.
+
+Reference numbers from the smoke test (NCBI Disease test, 981 sents):
+multi-word entities in **31.5%** of sentences, abbreviation density
+mean **0.17**, `( ABBR )` patterns in **11.1%** of sentences. CoNLL
+equivalents are typically <5% on multi-word entities and ~0% on
+parenthesised abbreviations - so the cross-domain gap exists in the
+data before any model is trained.
+
+To run the study:
+```
+cd code
+python main_NN.py --model bilstm_crf --dataset ncbi      --seeds 41 42 43
+python main_NN.py --model bilstm_crf --dataset bc5cdr    --seeds 41 42 43
+python main_NN.py --model bilstm_crf --dataset conll2003 --seeds 41 42 43
+python train_biobert.py --model microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext \
+    --train ../data/ner-disease/train.iob --test ../data/ner-disease/test.iob --save-attention
+python train_biobert.py --model bert-base-cased \
+    --train ../data/conll2003/train.txt    --test ../data/conll2003/test.txt    --save-attention
+
+python run_disagreement_study.py \
+    --datasets ncbi bc5cdr conll2003 \
+    --bilstm-weights '../models/bilstm_crf_seed42_*.h5' \
+    --biobert-dir ../models/biobert_ncbi \
+    --bert-dir    ../models/bert_conll2003 \
+    --n-sentences 200 --out-dir ../results
+```
+
+Significance tests on the resulting CSVs (paired bootstrap on
+disagreement(biomed) - disagreement(general)) are intentionally left
+to a downstream analysis script - that's where domain knowledge about
+the right test (paired vs. unpaired, per-bucket vs. global) belongs.
+
+
 ### What was *not* run in the 2026 refactor commit
 ------------------------------------------------------
 

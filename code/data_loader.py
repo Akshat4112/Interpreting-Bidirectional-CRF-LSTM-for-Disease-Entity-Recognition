@@ -169,5 +169,74 @@ def load_bc5cdr(
     return out
 
 
+def load_conll2003(
+    root: str = "../data/conll2003",
+    *,
+    segment: str = "document",
+) -> dict[str, NERDataset]:
+    """Load the CoNLL-2003 English NER corpus.
+
+    CoNLL-2003 is the canonical general-domain comparison corpus. It is
+    not redistributed in this repo (LDC-licensed); place the files at
+    `<root>/{train,valid,test}.txt` in CoNLL-2003 format (token, POS,
+    chunk, NER tag - whitespace-separated, blank lines between
+    sentences). The HuggingFace dataset `conll2003` works too; convert
+    with `scripts/convert_conll2003.py` (see README).
+
+    Default `segment="document"` keeps the native CoNLL sentence
+    boundaries (each blank-separated block is one sentence). Use
+    `segment="sentence"` to additionally split on `.` (rarely useful).
+
+    Tags returned are in IOB2 (HuggingFace conll2003 already provides
+    IOB2; if your source is IOB1 with `I-X` opening a span, run it
+    through `iob1_to_iob2()` below).
+    """
+    candidates = {
+        "train": ["train.txt", "train.tsv", "train.iob"],
+        "dev": ["valid.txt", "dev.txt", "valid.tsv", "dev.tsv"],
+        "test": ["test.txt", "test.tsv", "test.iob"],
+    }
+    out: dict[str, NERDataset] = {}
+    for split, names in candidates.items():
+        for n in names:
+            p = os.path.join(root, n)
+            if os.path.exists(p):
+                ds = load_iob(p, name=f"conll2003-{split}", segment=segment)
+                ds.tags = iob1_to_iob2(ds.tags)
+                out[split] = ds
+                break
+    if not out:
+        raise FileNotFoundError(
+            f"No CoNLL-2003 files found under {root}. See README for setup."
+        )
+    return out
+
+
+def iob1_to_iob2(tag_seqs: list[list[str]]) -> list[list[str]]:
+    """Convert IOB1-style tags to IOB2 (i.e., the first token of every
+    entity span gets B-, subsequent tokens get I-). CoNLL-2003 ships in
+    IOB1 by default; seqeval `mode='strict'` requires IOB2."""
+    out: list[list[str]] = []
+    for seq in tag_seqs:
+        new = []
+        prev = "O"
+        for t in seq:
+            if t == "O" or "-" not in t:
+                new.append("O")
+                prev = "O"
+                continue
+            prefix, label = t.split("-", 1)
+            if prefix == "I":
+                if prev == "O" or prev.split("-", 1)[1] != label:
+                    new.append(f"B-{label}")
+                else:
+                    new.append(t)
+            else:
+                new.append(t)
+            prev = new[-1]
+        out.append(new)
+    return out
+
+
 def flatten(seqs: Iterable[Iterable[str]]) -> list[str]:
     return [x for s in seqs for x in s]
