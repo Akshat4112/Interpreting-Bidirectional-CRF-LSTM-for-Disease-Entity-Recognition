@@ -4,7 +4,6 @@ import time
 import wandb
 import pickle
 from wandb.keras import WandbCallback
-wandb.init(project="GALE_LIME_NER_LSTM_CRF_DISEASE", entity="robofied")
 
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -65,10 +64,11 @@ class NeuralNetwork(object):
     
     #LSTM Model for training
     def LSTM_NN(self):
+        wandb.init(project="GALE_LIME_NER_LSTM_CRF_DISEASE", entity="robofied")
         wandb.config = {"learning_rate": 0.001,
-                        "epochs": 100,
-                        "batch_size": 128}
-                        
+                        "epochs": 20,
+                        "batch_size": 32}
+
         word_input = keras.Input(shape=(self.max_len,))
         model = layers.Embedding(input_dim=self.n_words, output_dim=50, input_length=self.max_len)(word_input)
         model = layers.SpatialDropout1D(0.1)(model)

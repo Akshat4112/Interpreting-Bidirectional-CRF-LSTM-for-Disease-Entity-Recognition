@@ -4,6 +4,8 @@ Version: 0.1
 Author: Akshat Gupta
 '''
 
+import glob
+import os
 import pickle
 from eli5.lime import TextExplainer
 from eli5.lime.samplers import MaskingTextSampler
@@ -12,6 +14,16 @@ from tensorflow import keras
 import eli5
 import pandas as pd
 import ast
+
+
+def _latest_checkpoint(models_dir='../models'):
+    candidates = glob.glob(os.path.join(models_dir, 'ckpt*.h5'))
+    if not candidates:
+        raise FileNotFoundError(
+            f"No checkpoints matching ckpt*.h5 found in {models_dir}. "
+            "Run main_NN.py (or Train.py) first."
+        )
+    return max(candidates, key=os.path.getmtime)
 
 '''
 To Create NER Explainer using LIME
@@ -42,9 +54,11 @@ class NERExplainerGenerator(object):
         return predict_func
 
 # To generate explanation for the sentence text
-def explaination_generator(text):
+def explaination_generator(text, checkpoint_path=None):
 
-    model  = keras.models.load_model('../models/ckpt1658660485.8331368.h5')
+    if checkpoint_path is None:
+        checkpoint_path = _latest_checkpoint()
+    model = keras.models.load_model(checkpoint_path)
     with open('../data/word2idx.pkl', "rb") as f:
         word2idx = pickle.load(f)
 

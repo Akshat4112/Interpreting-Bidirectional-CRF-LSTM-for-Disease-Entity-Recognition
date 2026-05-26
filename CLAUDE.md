@@ -26,11 +26,9 @@ pip install -r requirements.txt
 cd code
 python main_NB.py        # Naive Bayes pipeline (disease + gene)
 python main_NN.py        # Full BiLSTM pipeline: preprocess -> train -> LIME -> BioBERT t-SNE
-python Evaluation.py     # Standalone — note: file has no __main__ guard, importing it runs nothing
-python Explainer.py      # Standalone interpretability runs (requires trained .h5 + pickles)
 ```
 
-There is no test suite, linter config, or build step. There is no `__main__` guard anywhere — modules execute their entrypoint as soon as `python <file>.py` runs the script body at module scope.
+`main_NB.py` and `main_NN.py` are guarded by `if __name__ == "__main__":`. The other modules (`Train.py`, `Explainer.py`, `Evaluation.py`, etc.) only define classes/functions and are safe to import. There is no test suite, linter config, or build step.
 
 ## Data conventions
 
@@ -38,12 +36,12 @@ There is no test suite, linter config, or build step. There is no `__main__` gua
 - **Critical: tags carry literal trailing newlines and a leading `|`.** Comparisons are done against string literals exactly as `'|B-DISEASE\n'`, `'|I-DISEASE\n'`, `'|O\n'` (and `|B-PROTEIN\n` / `|I-PROTEIN\n` for the gene pipeline). Any code that strips whitespace from tags will break matching across `NaiveBayes`, `Evaluation`, `Explainer`, and `BioBertEmbeddings`.
 - **DataFrame artifact**: `main_NN.py`'s preprocessing writes `data/dfnew.csv` with columns `Sentence, Word, POS, Tag`. POS tags are filled via `nltk.pos_tag` token-by-token; sentence IDs increment on each `.` token. EDA and training both read this CSV.
 - **Vocab/label artifacts**: `Train.py` pickles `data/word2idx.pkl` and `data/tag2idx.pkl` (vocab capped at top-5000 most-common words, plus `PAD`=0 and `UNK`=1). `Explainer.py` and any inference must load these same pickles. `max_len = 114` is hard-coded.
-- **Model checkpoints**: saved as `models/ckpt<time.time()>.h5`. `Explainer.py` hard-codes a specific checkpoint filename (`ckpt1658660485.8331368.h5`); update it when retraining if you intend to run the explainer afterwards.
+- **Model checkpoints**: saved as `models/ckpt<time.time()>.h5`. `Explainer.explaination_generator()` accepts a `checkpoint_path` arg; if omitted it auto-selects the most recently modified `ckpt*.h5` in `../models/`.
 - **Figures**: accuracy/loss plots written to `figures/ckpt_acc<ts>.png` and `figures/ckpt_loss<ts>.png`.
 
 ## Experiment tracking
 
-`Train.py` calls `wandb.init(project="GALE_LIME_NER_LSTM_CRF_DISEASE", entity="robofied")` and uses `WandbCallback()` during `model.fit`. Either log into a wandb account that has access to that entity, run `wandb offline`, or unset/replace these calls before training.
+`Train.NeuralNetwork.LSTM_NN()` calls `wandb.init(project="GALE_LIME_NER_LSTM_CRF_DISEASE", entity="robofied")` and uses `WandbCallback()` during `model.fit`. The init now lives inside the method (not at module scope), so importing `Train` no longer triggers it. To train: either log into a wandb account that has access to that entity, run `wandb offline`, or unset/replace these calls before training.
 
 ## Pipeline data flow (BiLSTM)
 
@@ -66,5 +64,5 @@ There is no test suite, linter config, or build step. There is no `__main__` gua
 - Both `Train.py` files (`code/` and `archive/`) exist; only `code/Train.py` is imported by `main_NN.py`. Don't confuse them.
 - `DataPreperation.Preprocess` and `Preprocess.Preprocess` are two different classes used by the two pipelines — they share a name but live in separate modules. `main_NN.py` imports the former, `main_NB.py` the latter.
 - Tag-string comparisons must preserve the leading `|` and trailing `\n`. When in doubt, print `repr(tag)` rather than `tag`.
-- Scripts have side effects at import time (no `if __name__ == "__main__":`), so importing a module from this `code/` directory will execute its top-level code (e.g. `wandb.init` fires on `import Train`).
 - Relative paths assume `code/` is the cwd; introducing new entrypoints from the repo root requires either `os.chdir` or rewriting paths.
+- `explaination_generator` is a module-level function in `Explainer.py`, not a method on `NERExplainerGenerator` — call it as `from Explainer import explaination_generator`.

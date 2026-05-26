@@ -1,10 +1,12 @@
-***Interpreting Bidirectional-LSTM-CRF model for Disease Entities Recognition***
+***Interpreting Bidirectional-LSTM model for Disease Entities Recognition***
 ================
 
 The project was developed by Akshat Gupta and Silvia Cunico under the guidance of Prof. Roman Klinger, from the University of Stuttgart.
 The program has 2 main purposes:
 - Recognizing disease entities in text documents and labeling them according to the BIO labels
-- Interpreting the model's predictions with the LIME and GALE approximation techniques to explain the BI-LSTM CRF model
+- Interpreting the model's predictions with the LIME and GALE approximation techniques to explain the Bi-LSTM model
+
+> Note: although the repository name and earlier write-ups refer to a "Bi-LSTM-CRF" model, the currently active implementation in `code/Train.py` is a plain Bi-LSTM with a TimeDistributed softmax head. The CRF variant lives in `archive/Train.py` and is not wired into the pipeline.
 
 ----------
 
@@ -47,15 +49,15 @@ The format we refer to follows roughly the CoNLL 2003 format for NER task (https
 ### Results
 ----------
 
-Results plots from our trainings and evaluations of the BI-CRF-LSTM model on our NCBI-based dataset were stored in the /figures/ data folder.
+Results plots from our trainings and evaluations of the Bi-LSTM model on our NCBI-based dataset were stored in the /figures/ data folder.
 Also, all experiments are tracked using wandb.ai which can be accessed via: URL
 
-Comparison of precision, recall and F1 score ( 2*((precision* recall)/(precision+recall)) ) between the baseline Naive Bayes-based model and the Bi-LSTM-CRF model is displayed here:
+Comparison of precision, recall and F1 score ( 2*((precision* recall)/(precision+recall)) ) between the baseline Naive Bayes-based model and the Bi-LSTM model is displayed here:
 
 |             | Precision | Recall | F1-Score |
 |-------------|-----------|--------|----------|
 | Naive Bayes | 0.45      | 0.33   | 0.38     |
-| Bi-LSTM-CRF | 0.98      | 0.98   | 0.98     |
+| Bi-LSTM     | 0.98      | 0.98   | 0.98     |
 
 
 If you may wish to create plots of the accuracy and losses of your models, please create a /figures folder, too.
@@ -67,7 +69,7 @@ The program was written so that it can run to distinguish "DISEASE" entities fro
 To reach such training accuracy (99,82%) and validation accuracy (99,29%) we implemented: 
 
 1. A baseline method following the Naive Bayes algorithm to train and test;
-2. An advanced method with a Bidirectional-LSTM-CRF model. 
+2. An advanced method with a Bidirectional-LSTM model. 
 
 
 #### **Recognize disease entities in text documents and labeling them according to the BIO tags**
@@ -86,7 +88,7 @@ Command:
 ```
 To evaluate the Naive Nayes classifier's B, I, O labels predictions. 
 
-##### _An advanced method with a Bidirectional-LSTM-CRF model with BioBERT Embeddings_
+##### _An advanced method with a Bidirectional-LSTM model with BioBERT Embeddings_
 
 Command:
 ```
@@ -99,7 +101,7 @@ Before running the command:
 - Make sure that you have a /models folder in order to save the trained models' binaries;
 - Make sure that you have a /figures folder in order to store the accuracy and loss plot .png files.
 
-***Interpreting the model's predictions with the LIME and GALE approximation techniques to explain the BI-LSTM CRF model***
+***Interpreting the model's predictions with the LIME and GALE approximation techniques to explain the Bi-LSTM model***
 
 Command:
 ```
@@ -107,7 +109,7 @@ Command:
 ```
 
 **Important Notes:** 
-1. Only applies after having trained the advanced method with a [Bidirectional-LSTM-CRF model](#An-advanced-method-with-a-Bidirectional-LSTM-CRF-model-with-BioBERT-Embeddings) so requisites are:
+1. Only applies after having trained the advanced method with a [Bidirectional-LSTM model](#An-advanced-method-with-a-Bidirectional-LSTM-model-with-BioBERT-Embeddings) so requisites are:
     1. Having trained a model and saved its binary as .h5 
     2. Having saved the features word2idx and tag2idx as pickle files
 2. Make sure that you have a: /data/ner-disease/ folder to save the explanatory sentences and words after the LIME local approximation

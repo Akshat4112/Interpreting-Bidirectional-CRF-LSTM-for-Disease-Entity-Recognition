@@ -10,52 +10,48 @@ from Preprocess import Preprocess
 from NaiveBayes import NaiveBayes
 from Evaluation import PrecisionRecallEntityLevel, PrecisionRecall, PrecisionRecallEntityLevelGene
 
-train = '../data/ner-disease/train.iob'
-test = '../data/ner-disease/test.iob' 
-dev = '../data/ner-disease/dev.iob'
-dev_predicted = '../data/ner-disease/dev-predicted.iob'
+
+def run_disease_pipeline():
+    train = '../data/ner-disease/train.iob'
+    test = '../data/ner-disease/test.iob'
+
+    preprocess = Preprocess()
+    preprocess.text_to_data(filepath=train)
+    X, y = preprocess.preprocess_data()
+    preprocess.text_to_data(filepath=test)
+    Xtest, y_true = preprocess.preprocess_data()
+
+    nb = NaiveBayes()
+    nb.MultinomialNBTrain(X, y)
+
+    y_pred = [nb.MultinomialNBTest(item) for item in Xtest]
+
+    print("Results for Disease Level NER:")
+    PrecisionRecallEntityLevel(Xtest, y_pred, y_true)
 
 
-preprocess = Preprocess()
-preprocess.text_to_data(filepath=train)
-X, y = preprocess.preprocess_data()
-preprocess.text_to_data(filepath=test)
-Xtest, y_true = preprocess.preprocess_data()
+def run_gene_pipeline():
+    train = '../data/ner-gene/train.iob'
+    test = '../data/ner-gene/test.iob'
 
-nb = NaiveBayes()
-nb.MultinomialNBTrain(X,y)
+    preprocess = Preprocess()
+    preprocess.text_to_data(filepath=train)
+    X, y = preprocess.preprocess_data()
+    preprocess.text_to_data(filepath=test)
+    Xtest, y_true = preprocess.preprocess_data()
 
-y_pred = []
-for item in Xtest:
-    pred = nb.MultinomialNBTest(item)
-    y_pred.append(pred)
+    nb = NaiveBayes()
+    nb.MultinomialNBTrainGene(X, y)
 
-print("Results for Disease Level NER:")
-PrecisionRecallEntityLevel(Xtest, y_pred, y_true)
+    y_pred = [nb.MultinomialNBTestGene(item) for item in Xtest]
 
-# Training and Getting Entities for Gene Level Data
-
-train = '../data/ner-gene/train.iob'
-test = '../data/ner-gene/test.iob' 
-dev = '../data/ner-gene/dev.iob'
-dev_predicted = '../data/ner-gene/dev-predicted.iob'
+    print("Results for Gene Level NER:")
+    PrecisionRecallEntityLevelGene(Xtest, y_pred, y_true)
 
 
-preprocess = Preprocess()
-preprocess.text_to_data(filepath=train)
-X, y = preprocess.preprocess_data()
-preprocess.text_to_data(filepath=test)
-Xtest, y_true = preprocess.preprocess_data()
-
-nb = NaiveBayes()
-nb.MultinomialNBTrainGene(X,y)
-
-y_pred = []
-for item in Xtest:
-    pred = nb.MultinomialNBTestGene(item)
-    y_pred.append(pred)
-print("Results for Gene Level NER:")
-PrecisionRecallEntityLevelGene(Xtest, y_pred, y_true)
+if __name__ == "__main__":
+    run_disease_pipeline()
+    run_gene_pipeline()
 
 # For later use
 # ------------------------------------------------------
